@@ -1,0 +1,10 @@
+# DNA Veri Koruma Projesi - MVP Başlangıç
+def dna_verisini_kontrol_et(dna_dizisi):
+    print(f"Gelen DNA Dizisi işleniyor: {dna_dizisi}")
+    # İleride buraya homomorfik şifreleme kütüphaneleri (TenSEAL vb.) eklenecek.
+    return "Veri Güvenli / Şifrelendi"
+
+if __name__ == "__main__":
+    ornek_dna = "ATCG-TACG-GGCC-AATT"
+    sonuc = dna_verisini_kontrol_et(ornek_dna)
+    print(sonuc)
