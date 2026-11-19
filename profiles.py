@@ -7,15 +7,15 @@ DOMAIN_PROFILLERI = {
             "Düşük GC Senaryosu": "ATAT-TATA-AATT-TTAA",
             "Yüksek GC Senaryosu": "GGGG-CCCC-GCGC-CGCG",
         },
-        # Vektör sırası: [gc_sayisi, baz_uzunlugu, gc_orani, gc_at_orani, sabit_terim]
-        "weights": [0.05, 0.02, 0.0, 0.0, 0.1],
+        # Vektör sırası: [gc_sayisi, baz_uzunlugu, gc_orani, gc_at_orani, tekrar_sayisi, tekrar_orani, sabit_terim]
+        "weights": [0.05, 0.02, 0.0, 0.0, 0.01, 0.0, 0.1],
         "thresholds": {"low_max": 0.5, "high_min": 0.9},
     },
     "10q23.31 PTEN Bölgesi (Örnek Domain)": {
-        "aciklama": "10q23.31 PTEN bölgesine ait 120 bazlık örnek dizilim ile domain kalibrasyon simülasyonu.",
+        "aciklama": "10q23.31 PTEN bölgesine ait örnek dizilim ile domain kalibrasyon simülasyonu.",
         "klinik_not": "Örnek modelleme içindir; klinik tanı veya tedavi kararı yerine geçmez.",
         "ornekler": {
-            "PTEN 10q23.31 Örnek (120 bp)": (
+            "PTEN 10q23.31 Örnek": (
                 "ATG-ACA-GCC-ATC-ATC-AAA-GAG-ATC-GTT-AGC-AGA-AAC-AAA-AGG-AGA-"
                 "TAT-CAA-GAG-GAT-GGA-TTC-GAC-TTA-GAC-TTG-ACC-TAT-ATT-TAT-CCA-"
                 "AAC-ATT-ATT-GCT-ATG-GGA-TTT-CCT-GCA-GAA"
@@ -23,14 +23,14 @@ DOMAIN_PROFILLERI = {
             "Düşük GC Karşılaştırma": "ATAT-TATA-AATT-TTAA-ATAT-TATA",
             "Yüksek GC Karşılaştırma": "GGGG-CCCC-GCGC-CGCG-GGGG-CCCC",
         },
-        "weights": [0.002, 0.001, 0.45, 0.05, 0.15],
+        "weights": [0.002, 0.001, 0.40, 0.05, 0.01, 0.15, 0.15],
         "thresholds": {"low_max": 0.45, "high_min": 0.80},
     },
 }
 
 
 def ozellik_vektoru_cikar(dizi: str) -> dict:
-    """Genişletilebilir özellik vektörü ve oran/yoğunluk metriklerini üretir."""
+    """Genişletilebilir özellik vektörü, oran/yoğunluk ve tekrar metriklerini üretir."""
     temiz_bazlar = dizi.replace("-", "")
     baz_uzunlugu = len(temiz_bazlar)
 
@@ -45,11 +45,19 @@ def ozellik_vektoru_cikar(dizi: str) -> dict:
     gc_orani = (gc_sayisi / baz_uzunlugu) if baz_uzunlugu > 0 else 0.0
     gc_at_orani = (gc_sayisi / at_sayisi) if at_sayisi > 0 else float(gc_sayisi)
 
+    # Ardışık aynı nükleotid çifti tekrarı (örneğin AA, TT, CC, GG)
+    tekrar_sayisi = sum(
+        1 for i in range(len(temiz_bazlar) - 1) if temiz_bazlar[i] == temiz_bazlar[i + 1]
+    )
+    tekrar_orani = (tekrar_sayisi / (baz_uzunlugu - 1)) if baz_uzunlugu > 1 else 0.0
+
     vektor = [
         float(gc_sayisi),
         float(baz_uzunlugu),
         float(gc_orani),
         float(gc_at_orani),
+        float(tekrar_sayisi),
+        float(tekrar_orani),
         1.0,
     ]
 
@@ -60,8 +68,15 @@ def ozellik_vektoru_cikar(dizi: str) -> dict:
         "at_sayisi": at_sayisi,
         "gc_orani": gc_orani,
         "gc_at_orani": gc_at_orani,
+        "tekrar_sayisi": tekrar_sayisi,
+        "tekrar_orani": tekrar_orani,
         "dagilim": {"A": a_sayisi, "T": t_sayisi, "C": c_sayisi, "G": g_sayisi},
     }
+
+
+def acik_skor_hesapla(vektor: list[float], agirliklar: list[float]) -> float:
+    """Şifreleme olmadan doğrudan iç çarpım (plain dot product) skorunu hesaplar."""
+    return float(sum(float(v) * float(w) for v, w in zip(vektor, agirliklar)))
 
 
 def risk_seviyesi_belirle(skor: float, esikler: dict) -> str:
