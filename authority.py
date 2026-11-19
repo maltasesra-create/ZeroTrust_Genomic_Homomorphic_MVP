@@ -1,3 +1,4 @@
+import time
 import tenseal as ts
 
 
@@ -13,6 +14,7 @@ class YetkiliTaraf:
         if coeff_mod_bit_sizes is None:
             coeff_mod_bit_sizes = [60, 40, 40, 60]
 
+        t0 = time.perf_counter()
         self.context = ts.context(
             ts.SCHEME_TYPE.CKKS,
             poly_modulus_degree=poly_modulus_degree,
@@ -20,6 +22,7 @@ class YetkiliTaraf:
         )
         self.context.global_scale = global_scale
         self.context.generate_galois_keys()
+        self.baglam_suresi_ms = round((time.perf_counter() - t0) * 1000, 2)
 
     def genel_baglam_bayt(self) -> bytes:
         """Gizli anahtar içermeyen serileştirilmiş genel bağlamı üretir."""
@@ -27,12 +30,18 @@ class YetkiliTaraf:
         genel_context.make_context_public()
         return genel_context.serialize()
 
-    def vektor_sifrele_bayt(self, vektor: list[float]) -> bytes:
-        """Özellik vektörünü şifreleyip serileştirilmiş bayt olarak döndürür."""
+    def vektor_sifrele_bayt(self, vektor: list[float]) -> tuple[bytes, float]:
+        """Özellik vektörünü şifreleyip serileştirilmiş bayt ve süreyi (ms) döndürür."""
+        t0 = time.perf_counter()
         sifreli_vektor = ts.ckks_vector(self.context, vektor)
-        return sifreli_vektor.serialize()
+        bayt = sifreli_vektor.serialize()
+        sure_ms = round((time.perf_counter() - t0) * 1000, 2)
+        return bayt, sure_ms
 
-    def sonuc_coz_bayt(self, donen_sonuc_bayt: bytes) -> float:
-        """Sunucudan dönen şifreli sonucu kendi gizli anahtarıyla çözer."""
+    def sonuc_coz_bayt(self, donen_sonuc_bayt: bytes) -> tuple[float, float]:
+        """Sunucudan dönen şifreli sonucu çözer ve süreyi (ms) döndürür."""
+        t0 = time.perf_counter()
         cozulen_sifreli_sonuc = ts.ckks_vector_from(self.context, donen_sonuc_bayt)
-        return float(cozulen_sifreli_sonuc.decrypt()[0])
+        skor = float(cozulen_sifreli_sonuc.decrypt()[0])
+        sure_ms = round((time.perf_counter() - t0) * 1000, 2)
+        return skor, sure_ms
