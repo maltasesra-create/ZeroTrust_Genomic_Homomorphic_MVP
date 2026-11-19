@@ -1,125 +1,13 @@
 import streamlit as st
-import tenseal as ts
+from authority import YetkiliTaraf
+from compute_node import HesaplamaSunucusu
+from profiles import DOMAIN_PROFILLERI, ozellik_vektoru_cikar, risk_seviyesi_belirle
 
 st.set_page_config(
     page_title="ZeroTrust Genomic Homomorphic MVP",
     page_icon="🧬",
     layout="centered",
 )
-
-DOMAIN_PROFILLERI = {
-    "Temel GC / Uzunluk Senaryosu": {
-        "aciklama": "Prototip seviyesi temel baz ve GC ağırlıklı skorlama profili.",
-        "klinik_not": "Örnek modelleme içindir; klinik tanı veya tedavi kararı yerine geçmez.",
-        "ornekler": {
-            "Dengeli Örnek (Varsayılan)": "ATCG-TACG-GGCC-AATT",
-            "Düşük GC Senaryosu": "ATAT-TATA-AATT-TTAA",
-            "Yüksek GC Senaryosu": "GGGG-CCCC-GCGC-CGCG",
-        },
-        # Vektör sırası: [gc_sayisi, baz_uzunlugu, gc_orani, gc_at_orani, sabit_terim]
-        "weights": [0.05, 0.02, 0.0, 0.0, 0.1],
-        "thresholds": {"low_max": 0.5, "high_min": 0.9},
-    },
-    "10q23.31 PTEN Bölgesi (Örnek Domain)": {
-        "aciklama": "10q23.31 PTEN bölgesine ait 120 bazlık örnek dizilim ile domain kalibrasyon simülasyonu.",
-        "klinik_not": "Örnek modelleme içindir; klinik tanı veya tedavi kararı yerine geçmez.",
-        "ornekler": {
-            "PTEN 10q23.31 Örnek (120 bp)": (
-                "ATG-ACA-GCC-ATC-ATC-AAA-GAG-ATC-GTT-AGC-AGA-AAC-AAA-AGG-AGA-"
-                "TAT-CAA-GAG-GAT-GGA-TTC-GAC-TTA-GAC-TTG-ACC-TAT-ATT-TAT-CCA-"
-                "AAC-ATT-ATT-GCT-ATG-GGA-TTT-CCT-GCA-GAA"
-            ),
-            "Düşük GC Karşılaştırma": "ATAT-TATA-AATT-TTAA-ATAT-TATA",
-            "Yüksek GC Karşılaştırma": "GGGG-CCCC-GCGC-CGCG-GGGG-CCCC",
-        },
-        # Uzunluk şişmesini dengelemek için oran/yoğunluk ağırlıkları öne çıkarıldı
-        "weights": [0.002, 0.001, 0.45, 0.05, 0.15],
-        "thresholds": {"low_max": 0.45, "high_min": 0.80},
-    },
-}
-
-
-def ozellik_vektoru_cikar(dizi: str) -> dict:
-    """Genişletilebilir özellik vektörü ve oran/yoğunluk metriklerini üretir."""
-    temiz_bazlar = dizi.replace("-", "")
-    baz_uzunlugu = len(temiz_bazlar)
-
-    a_sayisi = temiz_bazlar.count("A")
-    t_sayisi = temiz_bazlar.count("T")
-    c_sayisi = temiz_bazlar.count("C")
-    g_sayisi = temiz_bazlar.count("G")
-
-    gc_sayisi = g_sayisi + c_sayisi
-    at_sayisi = a_sayisi + t_sayisi
-
-    gc_orani = (gc_sayisi / baz_uzunlugu) if baz_uzunlugu > 0 else 0.0
-    gc_at_orani = (gc_sayisi / at_sayisi) if at_sayisi > 0 else float(gc_sayisi)
-
-    vektor = [
-        float(gc_sayisi),
-        float(baz_uzunlugu),
-        float(gc_orani),
-        float(gc_at_orani),
-        1.0,
-    ]
-
-    return {
-        "vektor": vektor,
-        "baz_uzunlugu": baz_uzunlugu,
-        "gc_sayisi": gc_sayisi,
-        "at_sayisi": at_sayisi,
-        "gc_orani": gc_orani,
-        "gc_at_orani": gc_at_orani,
-        "dagilim": {"A": a_sayisi, "T": t_sayisi, "C": c_sayisi, "G": g_sayisi},
-    }
-
-
-def kurumsal_ckks_akisi(vektor: list[float], agirliklar: list[float]) -> tuple[float, dict]:
-    """Gizli anahtarı sunucuya vermeden CKKS şifreli iç çarpım ve çözümleme yapar."""
-    # 1. Yetkili Taraf: Bağlam ve anahtarları üretir
-    yetkili_context = ts.context(
-        ts.SCHEME_TYPE.CKKS,
-        poly_modulus_degree=8192,
-        coeff_mod_bit_sizes=[60, 40, 40, 60],
-    )
-    yetkili_context.global_scale = 2**40
-    yetkili_context.generate_galois_keys()
-
-    # Vektörü yetkili tarafta şifrele
-    sifreli_vektor = ts.ckks_vector(yetkili_context, vektor)
-    sifreli_vektor_bayt = sifreli_vektor.serialize()
-
-    # Sunucuya gönderilecek gizli-anahtarsız genel bağlam
-    genel_context = yetkili_context.copy()
-    genel_context.make_context_public()
-    genel_context_bayt = genel_context.serialize()
-
-    # 2. Hesaplama Sunucusu: Gizli anahtar olmadan hesaplar
-    sunucu_context = ts.context_from(genel_context_bayt)
-    sunucu_vektor = ts.ckks_vector_from(sunucu_context, sifreli_vektor_bayt)
-    sunucu_sifreli_sonuc = sunucu_vektor.dot(agirliklar)
-    donen_sonuc_bayt = sunucu_sifreli_sonuc.serialize()
-
-    # 3. Yetkili Taraf: Kendi gizli anahtarlı bağlamıyla sonucu çözer
-    cozulen_sifreli_sonuc = ts.ckks_vector_from(yetkili_context, donen_sonuc_bayt)
-    cozulmus_skor = float(cozulen_sifreli_sonuc.decrypt()[0])
-
-    meta = {
-        "sunucu_gizli_anahtar_var_mi": sunucu_context.is_private(),
-        "genel_context_kb": round(len(genel_context_bayt) / 1024, 2),
-        "sifreli_vektor_kb": round(len(sifreli_vektor_bayt) / 1024, 2),
-        "donen_sonuc_kb": round(len(donen_sonuc_bayt) / 1024, 2),
-    }
-    return cozulmus_skor, meta
-
-
-def risk_seviyesi_belirle(skor: float, esikler: dict) -> str:
-    if skor < esikler["low_max"]:
-        return "Düşük"
-    elif skor < esikler["high_min"]:
-        return "Orta"
-    return "Yüksek"
-
 
 st.title("🧬 Zero-Trust Genomik Risk Skorlama Prototipi")
 st.caption("Tam Homomorfik Şifreleme (FHE / CKKS) • Sıfır Güven (Zero-Trust) Analiz Arayüzü")
@@ -152,7 +40,29 @@ if st.button("🔒 Şifrele, Şifreli Hesapla ve Sonucu Çöz", type="primary"):
             ozellikler = ozellik_vektoru_cikar(temiz_dna)
             vektor = ozellikler["vektor"]
             weights = profil["weights"]
-            cozulmus_skor, meta = kurumsal_ckks_akisi(vektor, weights)
+
+            # 1. Yetkili Taraf
+            yetkili = YetkiliTaraf(
+                poly_modulus_degree=8192,
+                coeff_mod_bit_sizes=[60, 40, 40, 60],
+                global_scale=2**40,
+            )
+            genel_context_bayt = yetkili.genel_baglam_bayt()
+            sifreli_vektor_bayt = yetkili.vektor_sifrele_bayt(vektor)
+
+            # 2. Hesaplama Sunucusu
+            sunucu = HesaplamaSunucusu(genel_context_bayt)
+            donen_sonuc_bayt = sunucu.sifreli_dot_bayt(sifreli_vektor_bayt, weights)
+
+            # 3. Yetkili Taraf Çözümleme
+            cozulmus_skor = yetkili.sonuc_coz_bayt(donen_sonuc_bayt)
+
+            meta = {
+                "sunucu_gizli_anahtar_var_mi": sunucu.gizli_anahtar_var_mi,
+                "genel_context_kb": round(len(genel_context_bayt) / 1024, 2),
+                "sifreli_vektor_kb": round(len(sifreli_vektor_bayt) / 1024, 2),
+                "donen_sonuc_kb": round(len(donen_sonuc_bayt) / 1024, 2),
+            }
 
         risk_etiketi = risk_seviyesi_belirle(cozulmus_skor, profil["thresholds"])
 
