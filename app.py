@@ -122,7 +122,7 @@ def risk_seviyesi_belirle(skor: float, esikler: dict) -> str:
 
 
 st.title("🧬 Zero-Trust Genomik Risk Skorlama Prototipi")
-st.caption("Tam Homomorfik Şifreleme (FHE / CKKS) • Kuantum Kulr & Sıfır Güven Analiz Arayüzü")
+st.caption("Tam Homomorfik Şifreleme (FHE / CKKS) • Sıfır Güven (Zero-Trust) Analiz Arayüzü")
 st.info(
     "🛡️ **Zero-Trust Mahremiyet Notu:** Genetik veri şifreli uzayda işlenir; "
     "gizli anahtar hesaplama sunucusuna verilmeden (`make_context_public()`) şifreli akış yürütülür."
@@ -183,8 +183,8 @@ if st.button("🔒 Şifrele, Şifreli Hesapla ve Sonucu Çöz", type="primary"):
             st.write(f"- **Risk Eşikleri:** `{profil['thresholds']}`")
             st.write("- **CKKS Parametreleri:** `poly_modulus_degree=8192`, `scale=2^40`")
             st.write(f"- **Sunucuda Gizli Anahtar Var mı?:** `{meta['sunucu_gizli_anahtar_var_mi']}` (`make_context_public()` ile ayrıldı)")
+            st.write(f"- **Genel Bağlam Boyutu:** `{meta['genel_context_kb']} KB`")
             st.write(
-                f"- **Serileştirilmiş Yük Boyutları:** Genel Bağlam `{meta['genel_context_kb']} KB` • "
-                f"Şifreli Vektör `{meta['sifreli_vektor_kb']} KB` • Dönen Şifreli Sonuç `{meta['donen_sonuc_kb']} KB`"
+                f"- **Şifreli Vektör / Dönen Sonuç:** `{meta['sifreli_vektor_kb']} KB` / `{meta['donen_sonuc_kb']} KB`"
             )
-            st.write("- **Güvenlik Yaklaşımı:** Kuantum kulr perspektifi ve Sıfır Güven (Zero-Trust) ile gizli anahtar sunucuya taşınmadan uçtan uca şifreli akış.")
+            st.write("- **Güvenlik Yaklaşımı:** Sıfır Güven (Zero-Trust) ile gizli anahtar sunucuya taşınmadan uçtan uca şifreli akış.")
