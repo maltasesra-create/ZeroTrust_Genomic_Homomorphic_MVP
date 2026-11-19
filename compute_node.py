@@ -1,0 +1,19 @@
+import tenseal as ts
+
+
+class HesaplamaSunucusu:
+    """Gizli anahtar olmadan yalnızca genel bağlam ve şifreli vektörle hesaplama yapar."""
+
+    def __init__(self, genel_context_bayt: bytes):
+        self.context = ts.context_from(genel_context_bayt)
+        if self.context.is_private():
+            raise ValueError("Güvenlik ihlali: Hesaplama sunucusuna gizli anahtarlı bağlam verilemez.")
+
+    @property
+    def gizli_anahtar_var_mi(self) -> bool:
+        return self.context.is_private()
+
+    def sifreli_dot_bayt(self, sifreli_vektor_bayt: bytes, agirliklar: list[float]) -> bytes:
+        sifreli_vektor = ts.ckks_vector_from(self.context, sifreli_vektor_bayt)
+        sifreli_sonuc = sifreli_vektor.dot(agirliklar)
+        return sifreli_sonuc.serialize()
