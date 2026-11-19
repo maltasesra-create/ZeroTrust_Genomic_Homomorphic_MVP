@@ -7,7 +7,6 @@ st.set_page_config(
     layout="centered",
 )
 
-# Domain / Profil konfigürasyonları (ayrı yapı olarak ayrıştırıldı)
 DOMAIN_PROFILLERI = {
     "Temel GC / Uzunluk Senaryosu": {
         "aciklama": "Prototip seviyesi temel baz ve GC ağırlıklı skorlama profili.",
@@ -33,7 +32,7 @@ DOMAIN_PROFILLERI = {
             "Düşük GC Karşılaştırma": "ATAT-TATA-AATT-TTAA-ATAT-TATA",
             "Yüksek GC Karşılaştırma": "GGGG-CCCC-GCGC-CGCG-GGGG-CCCC",
         },
-        # Uzunluk şişmesini dengelemek için oran/yoğunluk ağırlıkları öne çıkarıldı (örnek prototip ağırlıkları)
+        # Uzunluk şişmesini dengelemek için oran/yoğunluk ağırlıkları öne çıkarıldı
         "weights": [0.002, 0.001, 0.45, 0.05, 0.15],
         "thresholds": {"low_max": 0.45, "high_min": 0.80},
     },
@@ -56,7 +55,6 @@ def ozellik_vektoru_cikar(dizi: str) -> dict:
     gc_orani = (gc_sayisi / baz_uzunlugu) if baz_uzunlugu > 0 else 0.0
     gc_at_orani = (gc_sayisi / at_sayisi) if at_sayisi > 0 else float(gc_sayisi)
 
-    # İleride yeni biyolojik özellikler (ör. motif/k-mer frekansı) bu listeye eklenebilir
     vektor = [
         float(gc_sayisi),
         float(baz_uzunlugu),
@@ -76,6 +74,45 @@ def ozellik_vektoru_cikar(dizi: str) -> dict:
     }
 
 
+def kurumsal_ckks_akisi(vektor: list[float], agirliklar: list[float]) -> tuple[float, dict]:
+    """Gizli anahtarı sunucuya vermeden CKKS şifreli iç çarpım ve çözümleme yapar."""
+    # 1. Yetkili Taraf: Bağlam ve anahtarları üretir
+    yetkili_context = ts.context(
+        ts.SCHEME_TYPE.CKKS,
+        poly_modulus_degree=8192,
+        coeff_mod_bit_sizes=[60, 40, 40, 60],
+    )
+    yetkili_context.global_scale = 2**40
+    yetkili_context.generate_galois_keys()
+
+    # Vektörü yetkili tarafta şifrele
+    sifreli_vektor = ts.ckks_vector(yetkili_context, vektor)
+    sifreli_vektor_bayt = sifreli_vektor.serialize()
+
+    # Sunucuya gönderilecek gizli-anahtarsız genel bağlam
+    genel_context = yetkili_context.copy()
+    genel_context.make_context_public()
+    genel_context_bayt = genel_context.serialize()
+
+    # 2. Hesaplama Sunucusu: Gizli anahtar olmadan hesaplar
+    sunucu_context = ts.context_from(genel_context_bayt)
+    sunucu_vektor = ts.ckks_vector_from(sunucu_context, sifreli_vektor_bayt)
+    sunucu_sifreli_sonuc = sunucu_vektor.dot(agirliklar)
+    donen_sonuc_bayt = sunucu_sifreli_sonuc.serialize()
+
+    # 3. Yetkili Taraf: Kendi gizli anahtarlı bağlamıyla sonucu çözer
+    cozulen_sifreli_sonuc = ts.ckks_vector_from(yetkili_context, donen_sonuc_bayt)
+    cozulmus_skor = float(cozulen_sifreli_sonuc.decrypt()[0])
+
+    meta = {
+        "sunucu_gizli_anahtar_var_mi": sunucu_context.is_private(),
+        "genel_context_kb": round(len(genel_context_bayt) / 1024, 2),
+        "sifreli_vektor_kb": round(len(sifreli_vektor_bayt) / 1024, 2),
+        "donen_sonuc_kb": round(len(donen_sonuc_bayt) / 1024, 2),
+    }
+    return cozulmus_skor, meta
+
+
 def risk_seviyesi_belirle(skor: float, esikler: dict) -> str:
     if skor < esikler["low_max"]:
         return "Düşük"
@@ -85,10 +122,10 @@ def risk_seviyesi_belirle(skor: float, esikler: dict) -> str:
 
 
 st.title("🧬 Zero-Trust Genomik Risk Skorlama Prototipi")
-st.caption("Tam Homomorfik Şifreleme (FHE / CKKS) • Sıfır Güven (Zero-Trust) Analiz Arayüzü")
+st.caption("Tam Homomorfik Şifreleme (FHE / CKKS) • Kuantum Kulr & Sıfır Güven Analiz Arayüzü")
 st.info(
     "🛡️ **Zero-Trust Mahremiyet Notu:** Genetik veri şifreli uzayda işlenir; "
-    "hesaplama adımları şifreli bağlam üzerinden yürütülür ve veri mahremiyeti korunur."
+    "gizli anahtar hesaplama sunucusuna verilmeden (`make_context_public()`) şifreli akış yürütülür."
 )
 
 st.subheader("1. Domain Profili ve Gen Dizilimi")
@@ -111,29 +148,15 @@ if st.button("🔒 Şifrele, Şifreli Hesapla ve Sonucu Çöz", type="primary"):
     if not temiz_dna or not set(temiz_dna).issubset(gecerli_karakterler):
         st.warning("Lütfen yalnızca A, T, C, G ve '-' karakterlerinden oluşan geçerli bir gen dizilimi girin.")
     else:
-        with st.spinner("CKKS bağlamı kuruluyor, özellik vektörü şifreleniyor ve homomorfik hesaplama yapılıyor..."):
-            context = ts.context(
-                ts.SCHEME_TYPE.CKKS,
-                poly_modulus_degree=8192,
-                coeff_mod_bit_sizes=[60, 40, 40, 60],
-            )
-            context.global_scale = 2**40
-            context.generate_galois_keys()
-
+        with st.spinner("Yetkili bağlam hazırlanıyor, sunucuda gizli anahtarsız hesaplama ve çözümleme yapılıyor..."):
             ozellikler = ozellik_vektoru_cikar(temiz_dna)
             vektor = ozellikler["vektor"]
             weights = profil["weights"]
-
-            # İstemci tarafı şifreleme
-            sifreli_vektor = ts.ckks_vector(context, vektor)
-            # Şifreli uzayda iç çarpım (dot product)
-            sifreli_skor = sifreli_vektor.dot(weights)
-            # Yetkili çözümleme
-            cozulmus_skor = float(sifreli_skor.decrypt()[0])
+            cozulmus_skor, meta = kurumsal_ckks_akisi(vektor, weights)
 
         risk_etiketi = risk_seviyesi_belirle(cozulmus_skor, profil["thresholds"])
 
-        st.success("Şifreli hesaplama ve sonuç çözme işlemi tamamlandı.")
+        st.success("3 aşamalı kurumsal şifreli hesaplama ve sonuç çözme tamamlandı.")
         st.subheader("2. Analiz Sonuçları")
 
         col1, col2, col3, col4 = st.columns(4)
@@ -152,11 +175,16 @@ if st.button("🔒 Şifrele, Şifreli Hesapla ve Sonucu Çöz", type="primary"):
             f"Nükleotid Dağılımı → A: {dag['A']} | T: {dag['T']} | C: {dag['C']} | G: {dag['G']}"
         )
 
-        with st.expander("Teknik Özet ve Güvenlik Detayları"):
+        with st.expander("Teknik Özet ve Kurumsal Anahtar Ayrımı Detayları"):
             st.write(f"- **Aktif Domain Profili:** `{secili_profil_adi}`")
             st.write(f"- **Baz Uzunluğu:** `{ozellikler['baz_uzunlugu']}`")
             st.write(f"- **Özellik Vektörü:** `{[round(x, 4) for x in vektor]}`")
             st.write(f"- **Profil Katsayıları:** `{weights}`")
             st.write(f"- **Risk Eşikleri:** `{profil['thresholds']}`")
             st.write("- **CKKS Parametreleri:** `poly_modulus_degree=8192`, `scale=2^40`")
-            st.write("- **Güvenlik Yaklaşımı:** Sıfır güven (Zero-Trust) ilkesiyle uçtan uca şifreli akış.")
+            st.write(f"- **Sunucuda Gizli Anahtar Var mı?:** `{meta['sunucu_gizli_anahtar_var_mi']}` (`make_context_public()` ile ayrıldı)")
+            st.write(
+                f"- **Serileştirilmiş Yük Boyutları:** Genel Bağlam `{meta['genel_context_kb']} KB` • "
+                f"Şifreli Vektör `{meta['sifreli_vektor_kb']} KB` • Dönen Şifreli Sonuç `{meta['donen_sonuc_kb']} KB`"
+            )
+            st.write("- **Güvenlik Yaklaşımı:** Kuantum kulr perspektifi ve Sıfır Güven (Zero-Trust) ile gizli anahtar sunucuya taşınmadan uçtan uca şifreli akış.")
