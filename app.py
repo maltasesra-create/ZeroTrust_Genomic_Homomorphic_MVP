@@ -1,3 +1,4 @@
+import random
 import streamlit as st
 import tenseal as ts
 
@@ -11,19 +12,38 @@ SENARYOLAR = {
     "Düşük GC Senaryosu": {
         "dizi": "ATAT-TATA-AATT-TTAA",
         "aciklama": "GC oranı düşük profil; düşük risk skoru üretir.",
+        "gc_araligi": (0.20, 0.35),
     },
     "Dengeli Örnek (Varsayılan)": {
         "dizi": "ATCG-TACG-GGCC-AATT",
         "aciklama": "A, T, C ve G bazlarının dengeli olduğu orta düzey profil.",
+        "gc_araligi": (0.45, 0.55),
     },
     "Yüksek GC Senaryosu": {
         "dizi": "GGGG-CCCC-GCGC-CGCG",
         "aciklama": "GC oranı yüksek profil; yüksek risk skoru üretir.",
+        "gc_araligi": (0.65, 0.80),
     },
 }
 
 # [GC sayısı ağırlığı, toplam baz uzunluğu ağırlığı, sabit terim]
 RISK_KATSAYILARI = [0.05, 0.02, 0.1]
+
+
+def rastgele_dna_uret(gc_min: float, gc_max: float, blok_sayisi: int = 4, blok_boyu: int = 4) -> str:
+    hedef_gc_orani = random.uniform(gc_min, gc_max)
+    toplam_baz = blok_sayisi * blok_boyu
+    gc_adedi = max(1, min(toplam_baz - 1, round(toplam_baz * hedef_gc_orani)))
+    at_adedi = toplam_baz - gc_adedi
+
+    bazlar = (
+        [random.choice(["G", "C"]) for _ in range(gc_adedi)]
+        + [random.choice(["A", "T"]) for _ in range(at_adedi)]
+    )
+    random.shuffle(bazlar)
+
+    gruplar = ["".join(bazlar[i : i + blok_boyu]) for i in range(0, toplam_baz, blok_boyu)]
+    return "-".join(gruplar)
 
 
 def ckks_skor_hesapla(dna_dizisi: str):
@@ -100,7 +120,7 @@ col_btn1, col_btn2 = st.columns(2)
 with col_btn1:
     tekli_calistir = st.button("🔒 Şifrele, Hesapla ve Çöz", type="primary", use_container_width=True)
 with col_btn2:
-    kiyasla_calistir = st.button("📊 3 Senaryoyu Yan Yana Kıyasla", use_container_width=True)
+    kiyasla_calistir = st.button("🎲 3 Senaryoyu Yan Yana Kıyasla", use_container_width=True)
 
 if tekli_calistir:
     temiz_dna = orijinal_dna.strip().upper()
@@ -129,16 +149,20 @@ if tekli_calistir:
 
 if kiyasla_calistir:
     st.markdown("---")
-    st.subheader("3 Senaryo Yan Yana Kıyaslama")
-    with st.spinner("Düşük GC, Dengeli ve Yüksek GC senaryoları şifreli uzayda hesaplanıyor..."):
+    st.subheader("3 Senaryo Yan Yana Kıyaslama (Bağımsız Rastgele Dizilimler)")
+    st.caption("Kutu içindeki manuel dizilimden bağımsız olarak her senaryo için yeni rastgele DNA dizilimi üretilip analiz edilir.")
+
+    with st.spinner("Her senaryo için rastgele dizilim üretiliyor ve şifreli uzayda analiz ediliyor..."):
         kiyas_kartlari = []
         tablo_satirlari = []
         for ad, icerik in SENARYOLAR.items():
-            res = ckks_skor_hesapla(icerik["dizi"])
+            gc_min, gc_max = icerik["gc_araligi"]
+            uretilen_dizi = rastgele_dna_uret(gc_min, gc_max)
+            res = ckks_skor_hesapla(uretilen_dizi)
             kiyas_kartlari.append((ad, res))
             tablo_satirlari.append({
                 "Senaryo": ad,
-                "Dizilim": res["dizi"],
+                "Rastgele Dizilim": res["dizi"],
                 "GC Oranı": f"%{res['gc_orani']:.1f}",
                 "Risk Skoru": round(res["skor"], 6),
                 "Risk Seviyesi": res["risk"],
