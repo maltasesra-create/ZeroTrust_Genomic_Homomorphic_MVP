@@ -1,7 +1,12 @@
 import streamlit as st
 from authority import YetkiliTaraf
 from compute_node import HesaplamaSunucusu
-from profiles import DOMAIN_PROFILLERI, ozellik_vektoru_cikar, risk_seviyesi_belirle
+from profiles import (
+    DOMAIN_PROFILLERI,
+    acik_skor_hesapla,
+    ozellik_vektoru_cikar,
+    risk_seviyesi_belirle,
+)
 
 st.set_page_config(
     page_title="ZeroTrust Genomic Homomorphic MVP",
@@ -41,6 +46,8 @@ if st.button("🔒 Şifrele, Şifreli Hesapla ve Sonucu Çöz", type="primary"):
             vektor = ozellikler["vektor"]
             weights = profil["weights"]
 
+            acik_skor = acik_skor_hesapla(vektor, weights)
+
             # 1. Yetkili Taraf
             yetkili = YetkiliTaraf(
                 poly_modulus_degree=8192,
@@ -48,20 +55,27 @@ if st.button("🔒 Şifrele, Şifreli Hesapla ve Sonucu Çöz", type="primary"):
                 global_scale=2**40,
             )
             genel_context_bayt = yetkili.genel_baglam_bayt()
-            sifreli_vektor_bayt = yetkili.vektor_sifrele_bayt(vektor)
+            sifreli_vektor_bayt, sifreleme_ms = yetkili.vektor_sifrele_bayt(vektor)
 
             # 2. Hesaplama Sunucusu
             sunucu = HesaplamaSunucusu(genel_context_bayt)
-            donen_sonuc_bayt = sunucu.sifreli_dot_bayt(sifreli_vektor_bayt, weights)
+            donen_sonuc_bayt, sunucu_ms = sunucu.sifreli_dot_bayt(sifreli_vektor_bayt, weights)
 
             # 3. Yetkili Taraf Çözümleme
-            cozulmus_skor = yetkili.sonuc_coz_bayt(donen_sonuc_bayt)
+            cozulmus_skor, cozme_ms = yetkili.sonuc_coz_bayt(donen_sonuc_bayt)
+            mutlak_fark = abs(acik_skor - cozulmus_skor)
 
             meta = {
                 "sunucu_gizli_anahtar_var_mi": sunucu.gizli_anahtar_var_mi,
                 "genel_context_kb": round(len(genel_context_bayt) / 1024, 2),
                 "sifreli_vektor_kb": round(len(sifreli_vektor_bayt) / 1024, 2),
                 "donen_sonuc_kb": round(len(donen_sonuc_bayt) / 1024, 2),
+                "acik_skor": acik_skor,
+                "mutlak_fark": mutlak_fark,
+                "baglam_ms": yetkili.baglam_suresi_ms,
+                "sifreleme_ms": sifreleme_ms,
+                "sunucu_ms": sunucu_ms,
+                "cozme_ms": cozme_ms,
             }
 
         risk_etiketi = risk_seviyesi_belirle(cozulmus_skor, profil["thresholds"])
@@ -75,13 +89,14 @@ if st.button("🔒 Şifrele, Şifreli Hesapla ve Sonucu Çöz", type="primary"):
         with col2:
             st.metric("GC Oranı", f"%{ozellikler['gc_orani'] * 100:.1f}")
         with col3:
-            st.metric("GC / AT Oranı", f"{ozellikler['gc_at_orani']:.2f}")
+            st.metric("Tekrar Oranı", f"%{ozellikler['tekrar_orani'] * 100:.1f}")
         with col4:
             st.metric("Risk Seviyesi", risk_etiketi)
 
         dag = ozellikler["dagilim"]
         st.caption(
             f"Baz Uzunluğu: {ozellikler['baz_uzunlugu']} | GC Sayısı: {ozellikler['gc_sayisi']} | "
+            f"Tekrar Sayısı: {ozellikler['tekrar_sayisi']} | "
             f"Nükleotid Dağılımı → A: {dag['A']} | T: {dag['T']} | C: {dag['C']} | G: {dag['G']}"
         )
 
@@ -96,5 +111,14 @@ if st.button("🔒 Şifrele, Şifreli Hesapla ve Sonucu Çöz", type="primary"):
             st.write(f"- **Genel Bağlam Boyutu:** `{meta['genel_context_kb']} KB`")
             st.write(
                 f"- **Şifreli Vektör / Dönen Sonuç:** `{meta['sifreli_vektor_kb']} KB` / `{meta['donen_sonuc_kb']} KB`"
+            )
+            st.write(
+                f"- **Açık Skor vs. CKKS Farkı:** `{meta['acik_skor']:.6f}` vs. `{cozulmus_skor:.6f}` "
+                f"(Mutlak Fark: `{meta['mutlak_fark']:.8f}`)"
+            )
+            st.write(
+                f"- **Adım Süreleri (Benchmark):** Bağlam `{meta['baglam_ms']} ms` • "
+                f"Şifreleme `{meta['sifreleme_ms']} ms` • Sunucu Dot `{meta['sunucu_ms']} ms` • "
+                f"Çözme `{meta['cozme_ms']} ms`"
             )
             st.write("- **Güvenlik Yaklaşımı:** Sıfır Güven (Zero-Trust) ile gizli anahtar sunucuya taşınmadan uçtan uca şifreli akış.")
