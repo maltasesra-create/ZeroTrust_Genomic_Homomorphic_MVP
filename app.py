@@ -1,4 +1,3 @@
-import random
 import streamlit as st
 import tenseal as ts
 
@@ -11,18 +10,15 @@ st.set_page_config(
 SENARYOLAR = {
     "Düşük GC Senaryosu": {
         "dizi": "ATAT-TATA-AATT-TTAA",
-        "aciklama": "GC oranı düşük profil; düşük risk skoru üretir.",
-        "gc_araligi": (0.20, 0.35),
+        "aciklama": "Düşük GC oranına sahip sabit referans dizilimi.",
     },
     "Dengeli Örnek (Varsayılan)": {
         "dizi": "ATCG-TACG-GGCC-AATT",
-        "aciklama": "A, T, C ve G bazlarının dengeli olduğu orta düzey profil.",
-        "gc_araligi": (0.45, 0.55),
+        "aciklama": "A, T, C ve G bazlarının dengeli olduğu sabit referans dizilimi.",
     },
     "Yüksek GC Senaryosu": {
         "dizi": "GGGG-CCCC-GCGC-CGCG",
-        "aciklama": "GC oranı yüksek profil; yüksek risk skoru üretir.",
-        "gc_araligi": (0.65, 0.80),
+        "aciklama": "Yüksek GC oranına sahip sabit referans dizilimi.",
     },
 }
 
@@ -30,26 +26,19 @@ SENARYOLAR = {
 RISK_KATSAYILARI = [0.05, 0.02, 0.1]
 
 
-def rastgele_dna_uret(gc_min: float, gc_max: float, blok_sayisi: int = 4, blok_boyu: int = 4) -> str:
-    hedef_gc_orani = random.uniform(gc_min, gc_max)
-    toplam_baz = blok_sayisi * blok_boyu
-    gc_adedi = max(1, min(toplam_baz - 1, round(toplam_baz * hedef_gc_orani)))
-    at_adedi = toplam_baz - gc_adedi
-
-    bazlar = (
-        [random.choice(["G", "C"]) for _ in range(gc_adedi)]
-        + [random.choice(["A", "T"]) for _ in range(at_adedi)]
-    )
-    random.shuffle(bazlar)
-
-    gruplar = ["".join(bazlar[i : i + blok_boyu]) for i in range(0, toplam_baz, blok_boyu)]
-    return "-".join(gruplar)
-
-
 def ckks_skor_hesapla(dna_dizisi: str):
     temiz_dna = dna_dizisi.strip().upper()
-    baz_uzunlugu = float(len(temiz_dna.replace("-", "")))
-    gc_sayisi = float(temiz_dna.count("G") + temiz_dna.count("C"))
+    sadece_baz = temiz_dna.replace("-", "")
+    baz_uzunlugu = float(len(sadece_baz))
+
+    a_sayisi = temiz_dna.count("A")
+    t_sayisi = temiz_dna.count("T")
+    c_sayisi = temiz_dna.count("C")
+    g_sayisi = temiz_dna.count("G")
+    tire_sayisi = temiz_dna.count("-")
+
+    gc_sayisi = float(g_sayisi + c_sayisi)
+    at_sayisi = float(a_sayisi + t_sayisi)
     vektor = [gc_sayisi, baz_uzunlugu, 1.0]
 
     context = ts.context(
@@ -65,6 +54,7 @@ def ckks_skor_hesapla(dna_dizisi: str):
     cozulmus_skor = float(sifreli_skor.decrypt()[0])
 
     gc_orani = (gc_sayisi / baz_uzunlugu) * 100 if baz_uzunlugu > 0 else 0.0
+    gc_at_orani = (gc_sayisi / at_sayisi) if at_sayisi > 0 else gc_sayisi
 
     if cozulmus_skor < 0.5:
         risk_etiketi = "Düşük"
@@ -77,10 +67,19 @@ def ckks_skor_hesapla(dna_dizisi: str):
         "dizi": temiz_dna,
         "baz_uzunlugu": int(baz_uzunlugu),
         "gc_sayisi": int(gc_sayisi),
+        "at_sayisi": int(at_sayisi),
         "gc_orani": gc_orani,
+        "gc_at_orani": gc_at_orani,
         "skor": cozulmus_skor,
         "risk": risk_etiketi,
         "vektor": vektor,
+        "baz_dagilimi": {
+            "A": a_sayisi,
+            "T": t_sayisi,
+            "C": c_sayisi,
+            "G": g_sayisi,
+            "-": tire_sayisi,
+        },
     }
 
 
@@ -93,11 +92,11 @@ with k1:
 with k2:
     st.metric("Güven Modeli", "Zero-Trust")
 with k3:
-    st.metric("Veri Modu", "Örnek Prototip")
+    st.metric("Veri Modu", "Sabit / Özel Giriş")
 
 st.info(
     "🛡️ **Zero-Trust Mahremiyet Notu:** Genetik özellik vektörü şifreli uzayda işlenir; "
-    "skorlama hesaplaması CKKS şifreli bağlam üzerinden yürütülür."
+    "skorlama hesaplaması açık metin yerine CKKS şifreli bağlam üzerinden yürütülür."
 )
 
 st.markdown("---")
@@ -120,7 +119,7 @@ col_btn1, col_btn2 = st.columns(2)
 with col_btn1:
     tekli_calistir = st.button("🔒 Şifrele, Hesapla ve Çöz", type="primary", use_container_width=True)
 with col_btn2:
-    kiyasla_calistir = st.button("🎲 3 Senaryoyu Yan Yana Kıyasla", use_container_width=True)
+    kiyasla_calistir = st.button("📊 3 Senaryoyu Yan Yana Kıyasla", use_container_width=True)
 
 if tekli_calistir:
     temiz_dna = orijinal_dna.strip().upper()
@@ -141,29 +140,54 @@ if tekli_calistir:
         with c1:
             st.metric("Risk Skoru", f"{sonuc['skor']:.6f}")
         with c2:
-            st.metric("GC Baz Sayısı", sonuc["gc_sayisi"])
-        with c3:
             st.metric("GC Oranı", f"%{sonuc['gc_orani']:.1f}")
+        with c3:
+            st.metric("GC / AT Oranı", f"{sonuc['gc_at_orani']:.2f}")
         with c4:
             st.metric("Risk Seviyesi", sonuc["risk"])
 
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.metric("GC Baz Sayısı", sonuc["gc_sayisi"])
+        with m2:
+            st.metric("AT Baz Sayısı", sonuc["at_sayisi"])
+        with m3:
+            st.metric("Baz Uzunluğu", sonuc["baz_uzunlugu"])
+
+        st.caption(
+            f"Nükleotid Dağılımı → A: {sonuc['baz_dagilimi']['A']} | "
+            f"T: {sonuc['baz_dagilimi']['T']} | "
+            f"C: {sonuc['baz_dagilimi']['C']} | "
+            f"G: {sonuc['baz_dagilimi']['G']} | "
+            f"Ayraç (-): {sonuc['baz_dagilimi']['-']}"
+        )
+
+        with st.expander("Teknik Özet ve Güvenlik Detayları"):
+            st.write(f"- **İşlenen Dizi:** `{sonuc['dizi']}`")
+            st.write(f"- **Özellik Vektörü:** `{sonuc['vektor']}`")
+            st.write(f"- **Risk Katsayıları:** `{RISK_KATSAYILARI}`")
+            st.write("- **CKKS Parametreleri:** `poly_modulus_degree=8192`, `scale=2^40`")
+            st.write("- **Güvenlik Yaklaşımı:** Sıfır güven (Zero-Trust) ilkesiyle uçtan uca şifreli akış.")
+
 if kiyasla_calistir:
     st.markdown("---")
-    st.subheader("3 Senaryo Yan Yana Kıyaslama (Bağımsız Rastgele Dizilimler)")
-    st.caption("Kutu içindeki manuel dizilimden bağımsız olarak her senaryo için yeni rastgele DNA dizilimi üretilip analiz edilir.")
+    st.subheader("3 Senaryo Yan Yana Kıyaslama (Sabit Referans Dizilimleri)")
+    st.caption("Üç temel profil sabit dizilimlerle ayrı ayrı şifrelenip skorlanarak tutarlılık gösterilir.")
 
-    with st.spinner("Her senaryo için rastgele dizilim üretiliyor ve şifreli uzayda analiz ediliyor..."):
+    with st.spinner("Sabit senaryolar şifreli uzayda hesaplanıyor..."):
         kiyas_kartlari = []
         tablo_satirlari = []
         for ad, icerik in SENARYOLAR.items():
-            gc_min, gc_max = icerik["gc_araligi"]
-            uretilen_dizi = rastgele_dna_uret(gc_min, gc_max)
-            res = ckks_skor_hesapla(uretilen_dizi)
+            res = ckks_skor_hesapla(icerik["dizi"])
             kiyas_kartlari.append((ad, res))
+            dag = res["baz_dagilimi"]
             tablo_satirlari.append({
                 "Senaryo": ad,
-                "Rastgele Dizilim": res["dizi"],
+                "Sabit Dizilim": res["dizi"],
+                "Uzunluk": res["baz_uzunlugu"],
                 "GC Oranı": f"%{res['gc_orani']:.1f}",
+                "GC / AT": f"{res['gc_at_orani']:.2f}",
+                "A/T/C/G": f"{dag['A']}/{dag['T']}/{dag['C']}/{dag['G']}",
                 "Risk Skoru": round(res["skor"], 6),
                 "Risk Seviyesi": res["risk"],
             })
@@ -175,6 +199,7 @@ if kiyasla_calistir:
             st.caption(f"`{res['dizi']}`")
             st.metric("Risk Skoru", f"{res['skor']:.6f}")
             st.write(f"GC Oranı: **%{res['gc_orani']:.1f}**")
+            st.write(f"GC / AT: **{res['gc_at_orani']:.2f}**")
             st.write(f"Risk: **{res['risk']}**")
 
     st.dataframe(tablo_satirlari, use_container_width=True, hide_index=True)
